@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 
-from sqlalchemy import create_engine, MetaData, select, Engine, func  
+from sqlalchemy import create_engine, MetaData, select, Engine, func, exc 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncEngine, AsyncSession
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -84,11 +84,19 @@ def _build_sync_router(engine, base_url, table_names, metadata, session_factory)
 
         @router.post(path, response_model=ResponseModel, status_code=201)
         def create(item: CreateModel, db: Session = Depends(get_db), _cls=cls, _table=table):
-            obj = _cls(**item.model_dump(exclude_none=True))
-            db.add(obj)
-            db.commit()
-            db.refresh(obj)
-            return sqlalchemy_to_dict(obj, _table)
+            try:
+                obj = _cls(**item.model_dump(exclude_none=True))
+                db.add(obj)
+                db.commit()
+                db.refresh(obj)
+                return sqlalchemy_to_dict(obj, _table)
+            except exc.IntegrityError as e:
+                db.rollback()
+                error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
+                raise HTTPException(status_code=400, detail=f"Integrity error: {error_msg}")
+            except Exception as e:
+                db.rollback()
+                raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
         @router.get(path, response_model=PaginatedResponseModel)
         def read_all(
@@ -125,14 +133,22 @@ def _build_sync_router(engine, base_url, table_names, metadata, session_factory)
             _cls=cls,
             _table=table,
         ):
-            obj = db.get(_cls, item_id)
-            if not obj:
-                raise HTTPException(404, "Not found")
-            for k, v in item.model_dump(exclude_none=True).items():
-                setattr(obj, k, v)
-            db.commit()
-            db.refresh(obj)
-            return sqlalchemy_to_dict(obj, _table)
+            try:
+                obj = db.get(_cls, item_id)
+                if not obj:
+                    raise HTTPException(404, "Not found")
+                for k, v in item.model_dump(exclude_none=True).items():
+                    setattr(obj, k, v)
+                db.commit()
+                db.refresh(obj)
+                return sqlalchemy_to_dict(obj, _table)
+            except exc.IntegrityError as e:
+                db.rollback()
+                error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
+                raise HTTPException(status_code=400, detail=f"Integrity error: {error_msg}")
+            except Exception as e:
+                db.rollback()
+                raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
         @router.delete(f"{path}/{{item_id}}", status_code=204)
         def delete(item_id: Any, db: Session = Depends(get_db), _cls=cls):
@@ -168,11 +184,19 @@ def _build_async_router(engine, base_url, table_names, metadata, session_factory
 
         @router.post(path, response_model=ResponseModel, status_code=201)
         async def create(item: CreateModel, db: AsyncSession = Depends(get_db), _cls=cls, _table=table):
-            obj = _cls(**item.model_dump(exclude_none=True))
-            db.add(obj)
-            await db.commit()
-            await db.refresh(obj)
-            return sqlalchemy_to_dict(obj, _table)
+            try:
+                obj = _cls(**item.model_dump(exclude_none=True))
+                db.add(obj)
+                await db.commit()
+                await db.refresh(obj)
+                return sqlalchemy_to_dict(obj, _table)
+            except exc.IntegrityError as e:
+                await db.rollback()
+                error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
+                raise HTTPException(status_code=400, detail=f"Integrity error: {error_msg}")
+            except Exception as e:
+                await db.rollback()
+                raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
         @router.get(path, response_model=PaginatedResponseModel)
         async def read_all(
@@ -211,14 +235,22 @@ def _build_async_router(engine, base_url, table_names, metadata, session_factory
             _cls=cls,
             _table=table,
         ):
-            obj = await db.get(_cls, item_id)
-            if not obj:
-                raise HTTPException(404, "Not found")
-            for k, v in item.model_dump(exclude_none=True).items():
-                setattr(obj, k, v)
-            await db.commit()
-            await db.refresh(obj)
-            return sqlalchemy_to_dict(obj, _table)
+            try:
+                obj = await db.get(_cls, item_id)
+                if not obj:
+                    raise HTTPException(404, "Not found")
+                for k, v in item.model_dump(exclude_none=True).items():
+                    setattr(obj, k, v)
+                await db.commit()
+                await db.refresh(obj)
+                return sqlalchemy_to_dict(obj, _table)
+            except exc.IntegrityError as e:
+                await db.rollback()
+                error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
+                raise HTTPException(status_code=400, detail=f"Integrity error: {error_msg}")
+            except Exception as e:
+                await db.rollback()
+                raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
         @router.delete(f"{path}/{{item_id}}", status_code=204)
         async def delete(item_id: Any, db: AsyncSession = Depends(get_db), _cls=cls):
